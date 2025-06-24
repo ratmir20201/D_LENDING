@@ -43,7 +43,7 @@ TARGET_TYPES = {
 
 logger.info("Инициализация парсера для листа 'Выдано'...")
 
-TABLE_NAME = "SANDBOX.D_LENDING_MANUFACTURING_BVU_RK"
+TABLE_NAME = "DWH.D_LENDING_MANUFACTURING_BVU_RK"
 
 
 def make_unique_columns(columns):
