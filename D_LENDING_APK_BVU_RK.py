@@ -261,4 +261,5 @@ with vertica_python.connect(**settings.conn_info) as connection:
 
     cur.executemany(insert_query, values)
 
+logger.info(f"Успешно загружено {len(df_final)} строк.")
 logger.info(f"Данные успешно загружены в Vertica с PACKAGE_ID = {new_package_id}")
