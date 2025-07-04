@@ -65,8 +65,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# target_table = "DWH.D_LENDING_APK_BVU_RK"
-target_table = "SANDBOX.D_LENDING_APK_BVU_RK"
+target_table = "DWH.D_LENDING_APK_BVU_RK"
+# target_table = "SANDBOX.D_LENDING_APK_BVU_RK"
 
 
 def extract_target_files(html):

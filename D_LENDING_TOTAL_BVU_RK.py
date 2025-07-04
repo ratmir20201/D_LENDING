@@ -35,8 +35,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# TABLE_NAME = "DWH.D_LENDING_TOTAL_BVU_RK"
-TABLE_NAME = "SANDBOX.D_LENDING_TOTAL_BVU_RK"
+TABLE_NAME = "DWH.D_LENDING_TOTAL_BVU_RK"
+# TABLE_NAME = "SANDBOX.D_LENDING_TOTAL_BVU_RK"
 
 
 # --- Вспомогательные функции ---
