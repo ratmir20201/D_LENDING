@@ -34,16 +34,17 @@ RUBRIC_URLS = [
 SEARCH_PHRASE = "Кредиты банковского сектора субъектам предпринимательства по видам экономической деятельности"
 TARGET_SHEET_NAME = "Выдано"
 TARGET_TYPES = {
-    1: "2. Обрабатывающая промышленность",
-    2: "3. Прочие отрасли промышленности",
-    3: "Транспорт и складирование",
-    4: "Информация и связь",
+    1: "обрабатывающая промышленность",
+    2: "прочие отрасли промышленности",
+    3: "транспорт и складирование",
+    4: "информация и связь",
 }
 
 
 logger.info("Инициализация парсера для листа 'Выдано'...")
 
-TABLE_NAME = "DWH.D_LENDING_MANUFACTURING_BVU_RK"
+# TABLE_NAME = "DWH.D_LENDING_MANUFACTURING_BVU_RK"
+TABLE_NAME = "SANDBOX.D_LENDING_MANUFACTURING_BVU_RK"
 
 
 def make_unique_columns(columns):
@@ -60,8 +61,6 @@ def make_unique_columns(columns):
 
 
 def parse_sheet_custom(xls, timestamp, package_id):
-    local_data = []
-
     if TARGET_SHEET_NAME not in xls.sheet_names:
         logger.error("   -> Лист 'Выдано' не найден.")
         return []
@@ -85,7 +84,6 @@ def parse_sheet_custom(xls, timestamp, package_id):
 
     df.columns = make_unique_columns(columns)
     df = df.iloc[5:].reset_index(drop=True)
-
     df.rename(columns={df.columns[0]: "Отрасли экономики"}, inplace=True)
     df = df[df["Отрасли экономики"].notna()]
 
@@ -117,52 +115,48 @@ def parse_sheet_custom(xls, timestamp, package_id):
         period = f"{year}-{month:02d}-{last_day}"
 
         desc = re.sub(r"\s+", " ", str(row["Отрасли экономики"]).strip())
-        value = row["ISSUED_LOAN_SUM"]
-
+        normalized_desc = re.sub(r"^\d+\.\s*", "", desc).lower()
         type_id = next(
-            (
-                k
-                for k, v in TARGET_TYPES.items()
-                if re.sub(r"\s+", " ", v.strip()) == desc
-            ),
-            None,
+            (k for k, v in TARGET_TYPES.items() if normalized_desc == v.lower()), None
         )
-        if type_id:
+
+        if type_id is None:
+            logger.info(f"Неизвестная отрасль: {desc}")
+            continue
+
+        value = float(row["ISSUED_LOAN_SUM"])
+        records.append(
+            {
+                "LOAD_DATE": timestamp,
+                "TYPE": type_id,
+                "TYPE_DESCRIPTION": desc,
+                "PERIOD": period,
+                "PERIOD_TYPE": "month",
+                "ISSUED_LOAN_SUM": value,
+                "PACKAGE_ID": package_id,
+            }
+        )
+
+    # Добавляем годовые суммы только при наличии всех 12 месяцев
+    df_months = pd.DataFrame(records)
+    df_months["YEAR"] = df_months["PERIOD"].str[:4]
+    df_months["MONTH"] = df_months["PERIOD"].str[5:7]
+
+    grouped = df_months.groupby(["TYPE", "TYPE_DESCRIPTION", "YEAR", "PACKAGE_ID"])
+    for (type_id, desc, year, pkg), group in grouped:
+        if group["MONTH"].nunique() == 12:
+            total_sum = group["ISSUED_LOAN_SUM"].sum()
             records.append(
                 {
                     "LOAD_DATE": timestamp,
                     "TYPE": type_id,
                     "TYPE_DESCRIPTION": desc,
-                    "PERIOD": period,
-                    "PERIOD_TYPE": "month",
-                    "ISSUED_LOAN_SUM": float(value),
-                    "PACKAGE_ID": package_id,
+                    "PERIOD": f"{year}-12-31",
+                    "PERIOD_TYPE": "year",
+                    "ISSUED_LOAN_SUM": total_sum,
+                    "PACKAGE_ID": pkg,
                 }
             )
-
-    # Добавляем годовые суммы
-    df_months = pd.DataFrame(records)
-    df_grouped = df_months.copy()
-    df_grouped["YEAR"] = df_grouped["PERIOD"].str[:4]
-    grouped = (
-        df_grouped.groupby(["TYPE", "TYPE_DESCRIPTION", "YEAR", "PACKAGE_ID"])
-        .agg({"ISSUED_LOAN_SUM": "sum"})
-        .reset_index()
-    )
-
-    for _, row in grouped.iterrows():
-        year_end_date = f"{row['YEAR']}-12-31"
-        records.append(
-            {
-                "LOAD_DATE": timestamp,
-                "TYPE": row["TYPE"],
-                "TYPE_DESCRIPTION": row["TYPE_DESCRIPTION"],
-                "PERIOD": year_end_date,
-                "PERIOD_TYPE": "year",
-                "ISSUED_LOAN_SUM": row["ISSUED_LOAN_SUM"],
-                "PACKAGE_ID": row["PACKAGE_ID"],
-            }
-        )
 
     return records
 
@@ -171,22 +165,25 @@ def parse_sheet_custom(xls, timestamp, package_id):
 with vertica_python.connect(**settings.conn_info) as conn:
     cursor = conn.cursor()
     cursor.execute(f"SELECT COALESCE(MAX(PACKAGE_ID), 0) FROM {TABLE_NAME}")
-    max_package_id = cursor.fetchone()[0]
-    PACKAGE_ID = max_package_id + 1
-    logger.info(f"Новый PACKAGE_ID: {PACKAGE_ID}")
+    PACKAGE_ID = cursor.fetchone()[0] + 1
+logger.info(f"Новый PACKAGE_ID: {PACKAGE_ID}")
 
 #  Сбор ссылок и парсинг
-logger.info("\U0001f50d Сбор ссылок...")
+logger.info("Сбор ссылок...")
 report_links = []
 for url in RUBRIC_URLS:
-    resp = requests.get(url)
-    soup = BeautifulSoup(resp.text, "html.parser")
-    for tag in soup.find_all("a", string=lambda t: t and SEARCH_PHRASE in t):
-        href = tag.get("href")
-        if href and href.startswith("/"):
-            report_links.append((BASE_URL + href, tag.string.strip()))
-
+    try:
+        resp = requests.get(url)
+        soup = BeautifulSoup(resp.text, "html.parser")
+        for tag in soup.find_all("a", string=lambda t: t and SEARCH_PHRASE in t):
+            href = tag.get("href")
+            if href and href.startswith("/"):
+                report_links.append((BASE_URL + href, tag.text.strip()))
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке {url}: {e}")
 logger.info(f" Найдено ссылок: {len(report_links)}")
+
+# Обработка файлов
 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 final_data = []
 
@@ -196,7 +193,9 @@ for link, title in report_links:
         resp = requests.get(link, timeout=30)
         resp.raise_for_status()
         xls = pd.ExcelFile(BytesIO(resp.content), engine="openpyxl")
-        final_data.extend(parse_sheet_custom(xls, timestamp, PACKAGE_ID))
+        parsed_data = parse_sheet_custom(xls, timestamp, PACKAGE_ID)
+        if parsed_data:
+            final_data.extend(parsed_data)
         del xls, resp
         gc.collect()
     except Exception as e:

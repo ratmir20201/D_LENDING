@@ -65,7 +65,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-target_table = "DWH.D_LENDING_APK_BVU_RK"
+# target_table = "DWH.D_LENDING_APK_BVU_RK"
+target_table = "SANDBOX.D_LENDING_APK_BVU_RK"
 
 
 def extract_target_files(html):
@@ -191,6 +192,7 @@ if not all_records:
 df_result = pd.DataFrame(all_records)
 df_result["PERIOD"] = pd.to_datetime(df_result["PERIOD"])
 df_result["YEAR"] = df_result["PERIOD"].dt.year
+df_result["MONTH"] = df_result["PERIOD"].dt.month
 
 with vertica_python.connect(**settings.conn_info) as connection:
     cur = connection.cursor()
@@ -199,15 +201,25 @@ with vertica_python.connect(**settings.conn_info) as connection:
     new_package_id = max_package_id + 1
     df_result["PACKAGE_ID"] = new_package_id
 
-    df_yearly = (
-        df_result.groupby(["YEAR", "TYPE", "TYPE_DESCRIPTION"])
-        .agg({"AGRICULTURAL_INDUSTRY": "sum"})
-        .reset_index()
-    )
-    df_yearly["PERIOD"] = pd.to_datetime(df_yearly["YEAR"].astype(str) + "-12-31")
-    df_yearly["PERIOD_TYPE"] = "year"
-    df_yearly["LOAD_DATE"] = LOAD_DATE
-    df_yearly["PACKAGE_ID"] = new_package_id
+    # Только если в году 12 месяцев — добавляем годовую сумму
+    df_yearly = []
+    for (year, t, desc), group in df_result[
+        df_result["PERIOD_TYPE"] == "month"
+    ].groupby(["YEAR", "TYPE", "TYPE_DESCRIPTION"]):
+        if group["MONTH"].nunique() == 12:
+            total = group["AGRICULTURAL_INDUSTRY"].sum()
+            df_yearly.append(
+                {
+                    "LOAD_DATE": LOAD_DATE,
+                    "PACKAGE_ID": new_package_id,
+                    "TYPE": t,
+                    "TYPE_DESCRIPTION": desc,
+                    "AGRICULTURAL_INDUSTRY": round(total, 2),
+                    "PERIOD": pd.to_datetime(f"{year}-12-31"),
+                    "PERIOD_TYPE": "year",
+                }
+            )
+    df_yearly = pd.DataFrame(df_yearly)
 
     df_final = pd.concat(
         [
@@ -222,17 +234,7 @@ with vertica_python.connect(**settings.conn_info) as connection:
                     "PERIOD_TYPE",
                 ]
             ],
-            df_yearly[
-                [
-                    "LOAD_DATE",
-                    "PACKAGE_ID",
-                    "TYPE",
-                    "TYPE_DESCRIPTION",
-                    "AGRICULTURAL_INDUSTRY",
-                    "PERIOD",
-                    "PERIOD_TYPE",
-                ]
-            ],
+            df_yearly,
         ],
         ignore_index=True,
     )

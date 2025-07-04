@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 from calendar import monthrange
 from datetime import datetime
@@ -20,6 +21,9 @@ listing_urls = [
     f"{base_url}/ru/news/banking-sector-loans-to-economy-analytics/rubrics/1907",
 ]
 
+save_folder = "downloads"
+os.makedirs(save_folder, exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s.%(msecs)03d] %(module)s:%(lineno)d %(levelname)s - %(message)s",
@@ -31,7 +35,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-TABLE_NAME = "DWH.D_LENDING_TOTAL_BVU_RK"
+# TABLE_NAME = "DWH.D_LENDING_TOTAL_BVU_RK"
+TABLE_NAME = "SANDBOX.D_LENDING_TOTAL_BVU_RK"
 
 
 # --- Вспомогательные функции ---
@@ -139,24 +144,74 @@ for title, report_url in report_links:
         for idx, val in enumerate(headers_row):
             if isinstance(val, str) and "." in val:
                 try:
-                    m, y = val.split(".")
+                    #                    val = val.strip().replace("*", "")
+                    #                    m, y = val.split(".")
+                    #                    m, y = int(m), int("20" + y)
+                    val_clean = re.sub(r"[^\d\.]", "", val)
+                    m, y = val_clean.split(".")
                     m, y = int(m), int("20" + y)
+                    # m, y = val.split("."); m, y = int(m), int("20" + y)
                     last_day = monthrange(y, m)[1]
                     full_date = f"{y}-{m:02d}-{last_day}"
                     col_nat = df_issued.columns[idx + 2]
                     col_for = df_issued.columns[idx + 3]
                     periods.append((val, full_date, col_nat, col_for))
+                #                    periods.append((val_clean, full_date, col_nat, col_for))
                 except:
                     continue
 
         rate_nat_col = df_rates.columns.get_loc("Unnamed: 7")
         rate_for_col = df_rates.columns.get_loc("Unnamed: 8")
-        rate_nat = get_value_by_keyword(df_rates, "по всем кредитам", rate_nat_col)
-        rate_for = get_value_by_keyword(df_rates, "по всем кредитам", rate_for_col)
+        # rate_nat = get_value_by_keyword(df_rates, "по всем кредитам", rate_nat_col)
+        # rate_for = get_value_by_keyword(df_rates, "по всем кредитам", rate_for_col)
 
-        for _, period_date, col_nat, col_for in periods:
+        # for _, period_date, col_nat, col_for in periods:
+        for short_period, period_date, col_nat, col_for in periods:
             col_nat_idx = df_issued.columns.get_loc(col_nat)
             col_for_idx = df_issued.columns.get_loc(col_for)
+
+            month_col_idx = None
+            for idx, val in enumerate(
+                df_rates.iloc[2]
+            ):  # строка с подписями месяцев: '12.24', '01.25', и т.д.
+                # if isinstance(val, str) and short_period in val:
+                #    month_col_idx = idx
+                #    break
+                if isinstance(val, str):
+                    clean_val = val.strip().replace("*", "")
+                    if short_period.strip().replace("*", "") == clean_val:
+                        month_col_idx = idx
+                        break
+
+            rate_nat = rate_for = None
+            if month_col_idx is not None:
+                try:
+                    label = str(df_rates.iloc[3, month_col_idx]).lower()
+                    # next_label = str(df_rates.iloc[3, month_col_idx + 1]).lower()
+                    # cur_rate = df_rates.iloc[4, month_col_idx]
+                    # next_rate = df_rates.iloc[4, month_col_idx + 1]
+                    if "нац" in label:
+                        rate_nat = df_rates.iloc[4, month_col_idx]
+                        rate_for = df_rates.iloc[4, month_col_idx + 1]
+                    else:
+                        rate_for = df_rates.iloc[4, month_col_idx]
+                        rate_nat = df_rates.iloc[4, month_col_idx + 1]
+                except Exception as e:
+                    print(f"Ошибка при извлечении ставок за {short_period}: {e}")
+                    rate_nat = None
+                    rate_for = None
+                # cell_currency = str(df_rates.iloc[3, month_col_idx]).lower()
+                # if "нац" in cell_currency:
+                #    rate_nat = df_rates.iloc[4, month_col_idx]
+                #    rate_for = df_rates.iloc[4, month_col_idx + 1]
+                # else:
+                #    rate_for = df_rates.iloc[4, month_col_idx]
+                #    rate_nat = df_rates.iloc[4, month_col_idx + 1]
+            # rate_row_idx = find_row_contains(df_rates, short_period)
+
+            # rate_nat = df_rates.iloc[rate_row_idx, rate_nat_col] if rate_row_idx is not None else None
+            # rate_for = df_rates.iloc[rate_row_idx, rate_for_col] if rate_row_idx is not None else None
+
             val_nat_total = (
                 get_value_by_keyword(df_issued, "всего кредиты выданные", col_nat_idx)
                 or 0
