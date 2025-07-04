@@ -261,7 +261,24 @@ with vertica_python.connect(**settings.conn_info) as connection:
         for _, row in df_final.iterrows()
     ]
 
-    cur.executemany(insert_query, values)
+    # cur.executemany(insert_query, values)
+
+    for row in df_final.itertuples(index=False):
+        try:
+            cur.execute(
+                insert_query,
+                (
+                    row.LOAD_DATE,
+                    row.PACKAGE_ID,
+                    row.TYPE,
+                    row.TYPE_DESCRIPTION,
+                    row.AGRICULTURAL_INDUSTRY,
+                    row.PERIOD,
+                    row.PERIOD_TYPE,
+                ),
+            )
+        except Exception as e:
+            logger.error("Ошибка при вставке строки: %s. Ошибка: %s", row, str(e))
 
 logger.info(f"Успешно загружено {len(df_final)} строк.")
 logger.info(f"Данные успешно загружены в Vertica с PACKAGE_ID = {new_package_id}")

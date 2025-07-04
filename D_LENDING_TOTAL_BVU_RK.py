@@ -311,7 +311,19 @@ df = df.where(pd.notnull(df), None)
 
 with vertica_python.connect(**settings.conn_info) as conn:
     cursor = conn.cursor()
-    for record in df.to_dict(orient="records"):
-        cursor.execute(insert_query, record)
+    successful = 0
+    failed_rows = 0
+
+    for idx, record in enumerate(df.to_dict(orient="records"), start=1):
+        try:
+            cursor.execute(insert_query, record)
+            successful += 1
+        except Exception as e:
+            logger.error(f"Ошибка при вставке строки #{idx}: {record}")
+            logger.error(f"Текст ошибки: {str(e)}")
+            failed_rows += 1
+
     conn.commit()
-    logger.info(f"Успешно загружено {len(df)} строк.")
+    logger.info(f"Успешно загружено строк: {successful}")
+    if failed_rows:
+        logger.warning(f"Не удалось загрузить строк: {failed_rows}")

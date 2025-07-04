@@ -121,7 +121,7 @@ def parse_sheet_custom(xls, timestamp, package_id):
         )
 
         if type_id is None:
-            logger.info(f"Неизвестная отрасль: {desc}")
+            # logger.info(f"Неизвестная отрасль: {desc}")
             continue
 
         value = float(row["ISSUED_LOAN_SUM"])
@@ -228,8 +228,29 @@ if final_data:
 
     with vertica_python.connect(**settings.conn_info) as conn:
         cursor = conn.cursor()
-        cursor.executemany(insert_query, df.to_dict(orient="records"))
-        conn.commit()
-        logger.info(f"Загружено в витрину: {len(df)} строк.")
+        try:
+            cursor.executemany(insert_query, df.to_dict(orient="records"))
+            conn.commit()
+            logger.info(f"Загружено в витрину: {len(df)} строк.")
+        except Exception as e:
+            logger.exception("Ошибка при пакетной вставке в Vertica: %s", str(e))
+            logger.info(
+                "Переход на построчную вставку для логирования проблемных записей..."
+            )
+            failed_rows = []
+            for idx, row in df.iterrows():
+                try:
+                    cursor.execute(insert_query, row.to_dict())
+                except Exception as row_err:
+                    logger.error(
+                        "Ошибка при вставке строки №%d: %s", idx, row.to_dict()
+                    )
+                    logger.error("Текст ошибки: %s", str(row_err))
+                    failed_rows.append(row.to_dict())
+            conn.commit()
+            logger.warning(
+                "Построчная вставка завершена. Ошибочных строк: %d", len(failed_rows)
+            )
+
 else:
     logger.error("Данные не найдены.")
